@@ -105,8 +105,16 @@ cd /workspaces/FIAP-Platform-Engineering/01-Terraform/demos/03-Count
 **2.** Garanta as ferramentas do provisionamento. Cada EC2 da frota é provisionada via SSM, o que usa a **AWS CLI** e o **`jq`** na sua própria máquina (o Codespaces) para enviar o `script.sh`. O devcontainer já instala ambos, mas se você começou o lab por aqui (pulou os anteriores), este passo garante:
 
 ```bash
-command -v aws >/dev/null || { echo "Instale o AWS CLI"; }
-command -v jq  >/dev/null || sudo apt-get install -y jq
+# jq e unzip (Ubuntu) — unzip e necessario para o instalador da AWS CLI
+sudo apt-get update -y && sudo apt-get install -y jq unzip
+
+# AWS CLI v2 (Ubuntu/x86_64) — instalador oficial da AWS
+command -v aws >/dev/null || {
+  curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  sudo /tmp/aws/install --update
+}
+
 aws --version && jq --version
 ```
 
