@@ -1,0 +1,26 @@
+---
+# Instala o TFLint no runner. Ele e usado no stage de validacao do modulo 03
+# (CI/CD), ao lado do Checkov, para pegar erros que o 'terraform validate' nao ve
+# (tipos de instancia invalidos, atributos depreciados, boas praticas AWS).
+- name: Verificar se o TFLint ja esta instalado
+  command: tflint --version
+  register: tflint_check
+  failed_when: false
+  changed_when: false
+
+- name: Instalar o TFLint (script oficial)
+  shell: |
+    set -o pipefail
+    curl -sSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+  args:
+    executable: /bin/bash
+  when: tflint_check.rc != 0
+
+- name: Confirmar a versao do TFLint
+  command: tflint --version
+  register: tflint_version
+  changed_when: false
+
+- name: Mostrar a versao do TFLint
+  debug:
+    msg: "{{ tflint_version.stdout_lines }}"

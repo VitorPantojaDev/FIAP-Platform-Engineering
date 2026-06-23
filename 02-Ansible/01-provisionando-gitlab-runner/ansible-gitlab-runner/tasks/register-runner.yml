@@ -1,4 +1,25 @@
 ---
+# O token de autenticacao do runner (glrt-...) NAO fica hardcoded neste arquivo.
+# O aluno o guarda uma vez no AWS SSM Parameter Store como SecureString e o
+# Ansible o le aqui em tempo de execucao, pelo lookup amazon.aws.ssm_parameter.
+# O lookup roda no CONTROLLER (Codespaces), usando as credenciais AWS do ambiente
+# — as mesmas que o resto do lab usa. Nenhum segredo entra no git.
+- name: Ler o token do runner do SSM Parameter Store
+  ansible.builtin.set_fact:
+    gitlab_runner_token: "{{ lookup('amazon.aws.ssm_parameter', gitlab_runner_token_ssm_path, region=gitlab_runner_ssm_region, on_missing='skip') | default('', true) }}"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Abortar se o token nao foi encontrado no SSM
+  ansible.builtin.fail:
+    msg: >-
+      Token do runner nao encontrado em '{{ gitlab_runner_token_ssm_path }}' (SSM
+      Parameter Store, regiao {{ gitlab_runner_ssm_region }}). Guarde o token glrt-
+      do GitLab com: aws ssm put-parameter --name '{{ gitlab_runner_token_ssm_path }}'
+      --type SecureString --value 'glrt-SEU-TOKEN' --region {{ gitlab_runner_ssm_region }} --overwrite
+  when: gitlab_runner_token | default('') | length == 0
+
 - name: Clear Config File
   block:
     - name: configfile Toml
@@ -26,27 +47,19 @@
         modification_time: preserve
         access_time: preserve
       become: "{{ gitlab_runner_system_mode }}"
-  
 
-- name: Construct the runner command without secrets
-  # makes the command visible in awx without the secrets and therefore helps with debugging
-  set_fact:
-    command: >
-      {{ gitlab_runner_executable }} register
-      --non-interactive
-      --url 'https://gitlab.com/'
-      --description '{{ gitlab_runner_name }}'
-      --tag-list 'shell,terraform'
-      --executor 'shell'
-      --access-level="not_protected"
-      --locked="false" 
-      --run-untagged="true"
-
-- name: Register runner to GitLab
+# As tags (shell,terraform), o nivel de acesso e o "run untagged" sao definidos na
+# CRIACAO do runner pela UI do GitLab (token glrt-, fluxo do GitLab 16+). Com token
+# de autenticacao, o 'register' ignora --tag-list/--locked/--access-level/
+# --run-untagged: esses parametros so valem na UI/API. Por isso o registro abaixo so
+# vincula esta maquina ao runner ja criado, preservando as tags definidas na UI.
+- name: Registrar o runner no GitLab (vincula esta maquina ao runner criado na UI)
   command: >
-    {{ command }}
-    --registration-token 'SEU TOKEN VAI AQUI'
-    {% if gitlab_runner.cache_s3_secret_key is defined %}
-    --cache-s3-secret-key '{{ gitlab_runner.cache_s3_secret_key }}'
-    {% endif %}
+    {{ gitlab_runner_executable }} register
+    --non-interactive
+    --url 'https://gitlab.com/'
+    --token '{{ gitlab_runner_token }}'
+    --description '{{ gitlab_runner_name }}'
+    --executor 'shell'
   become: "{{ gitlab_runner_system_mode }}"
+  no_log: true

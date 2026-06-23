@@ -1,0 +1,8 @@
+# Artefatos locais do Terraform e do empacotamento da Lambda
+.terraform/
+.terraform.lock.hcl
+build/
+*.tfstate
+*.tfstate.*
+planfile
+Checkov-Report.xml

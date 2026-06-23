@@ -2,7 +2,7 @@
 
 Módulo prático sobre **integração e entrega contínua de infraestrutura** com **GitLab CI/CD** rodando no seu próprio **GitLab Runner** (o mesmo que você provisionou com Ansible no módulo 02). A ideia central: transformar o `terraform plan` / `terraform apply` que você rodava na mão em um **pipeline automático**, acionado a cada `push` na branch `master`, com um **gate de segurança** que barra configuração insegura **antes** dela chegar na nuvem.
 
-São **2 demos sequenciais + 1 exercício**, todos sobre o repositório `primeiro-projeto` no GitLab e o runner registrado no módulo anterior.
+São **2 demos sequenciais**, ambas sobre o repositório `primeiro-projeto` no GitLab e o runner registrado no módulo anterior.
 
 ## Mês 3 do arco da Vortex Mobility
 
@@ -13,16 +13,15 @@ São **2 demos sequenciais + 1 exercício**, todos sobre o repositório `primeir
 
 Este é o terceiro mês do arco. A pergunta-âncora do repositório inteiro — *"quanto tempo a Vortex leva para recriar toda a sua infraestrutura do zero, de forma confiável e auditável?"* — chega à sua resposta final aqui: **um push, automatizado e validado**.
 
-## Os 3 itens deste módulo
+## Os 2 itens deste módulo
 
 | # | Item | O que você faz | Tempo estimado |
 |---|------|----------------|----------------|
-| **03.1** | **[Primeiro pipeline](01-Primeiro-pipeline/README.md)** | Cria o `.gitlab-ci.yml` com dois stages — `plan` (CI) e `apply` (CD) — e vê o pipeline rodar sozinho a cada push na `master`. | 30-45 min |
-| **03.2** | **[Validando e gerando relatórios](02-Validando-e-gerando-relatorios/README.md)** | Adiciona um stage `validate` com `terraform validate` + **Checkov** (gate de segurança), gerando relatório JUnit visível na aba **Tests** do GitLab. | 30-45 min |
-| **03.3** | **[Exercício](03-Exercicio/README.md)** | Consolida tudo: pega o código da demo Count, cria um novo repositório, configura estado remoto e monta um pipeline de **3 stages** end-to-end por conta própria. | 60-90 min |
+| **03.1** | **[Primeiro pipeline](01-Primeiro-pipeline/README.md)** | Cria o `.gitlab-ci.yml` com dois stages — `plan` (CI) e `apply` (CD) — e vê o pipeline subir uma **API serverless** (API Gateway + Lambda + DynamoDB) sozinho a cada push na `master`. | 30-45 min |
+| **03.2** | **[Validando e gerando relatórios](02-Validando-e-gerando-relatorios/README.md)** | Adiciona um stage `validate` com `terraform fmt`/`validate`, **TFLint**, **Checkov**, **terraform test** e validação do código da Lambda — um gate de qualidade e segurança que gera relatório JUnit visível na aba **Tests** do GitLab. | 30-45 min |
 
 > [!TIP]
-> Faça na ordem: 03.1 → 03.2 → 03.3. A demo 03.2 evolui o mesmo `.gitlab-ci.yml` da 03.1, e o exercício 03.3 só faz sentido depois de você ter visto os 3 stages funcionando.
+> Faça na ordem: 03.1 → 03.2. A demo 03.2 evolui o mesmo `.gitlab-ci.yml` da 03.1, adicionando o gate de validação antes do `plan`.
 
 ## Pré-requisitos do módulo
 
@@ -50,20 +49,21 @@ Para amarrar o repositório inteiro, seguimos a narrativa da **Vortex Mobility**
 - **Diego Tavares** (SRE sênior, seu mentor) — abre **este módulo** e aparece nos checkpoints cobrando automação e segurança.
 - **Você** (Platform Engineer recém-contratado) — implementa o pipeline.
 
-Cada demo vira **uma resposta concreta** ao pedido do Diego: primeiro o pipeline roda sozinho (03.1), depois ele vira **confiável** com um gate de validação (03.2), e por fim você prova que sabe montar tudo do zero (03.3).
+Cada demo vira **uma resposta concreta** ao pedido do Diego: primeiro o pipeline roda sozinho e sobe a API da Vortex (03.1), depois ele vira **confiável** com um gate de validação e testes antes do `apply` (03.2).
 
 ## Decisões pedagógicas
 
 1. **Por que GitLab CI/CD e não GitHub Actions?** Você já registrou um GitLab Runner próprio no módulo 02. Manter a continuidade (mesmo runner, mesmo `primeiro-projeto`) deixa o arco coeso e mostra o runner self-hosted em uso real.
-2. **Por que `tags: shell`?** O runner do módulo 02 foi registrado com o executor `shell`, rodando direto no servidor EC2 (com Terraform, AWS CLI e Checkov já instalados via Ansible). É isso que faz cada job encontrar `terraform` no PATH.
-3. **Por que Checkov como gate?** Checkov é um scanner de IaC amplamente adotado no mercado. Ele transforma "config insegura" em algo objetivo e automatizável — exatamente o que o Diego pediu para "barrar antes de chegar na nuvem".
+2. **Por que `tags: shell`?** O runner do módulo 02 foi registrado com o executor `shell`, rodando direto no servidor EC2 (com Terraform, AWS CLI, TFLint e Checkov já instalados via Ansible). É isso que faz cada job encontrar `terraform` no PATH.
+3. **Por que um gate de validação?** O stage `validate` reúne ferramentas amplamente adotadas no mercado — `terraform fmt`/`validate`, **TFLint**, **Checkov** e **terraform test** — que transformam "config insegura ou mal feita" em algo objetivo e automatizável, barrando o problema **antes** de chegar na nuvem (exatamente o que o Diego pediu).
+4. **Por que uma API serverless (Lambda + API Gateway + DynamoDB)?** É um deploy free-tier, rápido (apply em segundos) e que entrega algo **navegável** ao final — uma URL que responde. Mais próximo de um deploy real de aplicação do que provisionar um recurso isolado.
 
 ## Custo do módulo
 
-O pipeline em si não cria infraestrutura nova além da que o Terraform do `primeiro-projeto` já provisiona (uma fila SQS, na demo 03.1) e dos recursos da demo Count no exercício (instâncias EC2 + ELB).
+O pipeline cria a **API serverless** do `primeiro-projeto`: uma função **Lambda**, uma **API Gateway HTTP** e uma tabela **DynamoDB** on-demand — todas no **free-tier**. O que custa de verdade é o **runner** do módulo 02 (a EC2 `t3.small`, ~$0,02/h), que fica ligado para executar os pipelines deste módulo.
 
 > [!CAUTION]
-> O exercício **03.3 cria EC2 + ELB**, que são **pagos**. Ao terminar, rode `terraform destroy -auto-approve` (ou adicione um job de destroy ao pipeline, conforme instruído no lab). Esquecer 2 EC2 `t3.micro` + 1 ELB ligados por 1 dia consome parte relevante do orçamento do Learner Lab.
+> **Não destrua o runner antes de terminar o módulo 03** — os pipelines dependem dele. O `terraform destroy` da API **e** do runner está no **passo final do Lab 03.2** (Parte 5). Rode lá, ao concluir o CI/CD, para zerar o custo.
 
 ## Próximo passo
 

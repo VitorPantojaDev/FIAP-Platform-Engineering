@@ -1,31 +1,26 @@
 ---
-- name: Install virtualenv module
-  pip:
-    name: virtualenv
-- name: Create Python3-virtual environment folder
-  file:
-    name: /home/ubuntu/venv
-    state: directory
-- name: copying file with playbook
-  become: true 
+# Usamos o Python 3 NATIVO do Ubuntu 22.04 (3.10), nao mais o python3.8 do PPA
+# deadsnakes. O virtualenv moderno deixou de suportar 3.8 ("oldest supported target
+# is Python 3.9"), entao a versao antiga quebrava. O venv e criado com o proprio
+# 'python3 -m venv', sem depender do pacote 'virtualenv'.
+#
+# O venv fica em /opt/venv (local neutro), NAO em /home/ubuntu/venv: o pipeline do
+# modulo 03 roda como usuario 'gitlab-runner', que nao tem acesso ao home do
+# 'ubuntu' (permissao 700). Em /opt/venv qualquer usuario do runner consegue ativar
+# o Checkov.
+- name: Copiar requirements.txt do venv
   copy:
     src: requirements.txt
-    dest: /home/ubuntu/venv/requirements.txt
-- name: copying file requirements-global with playbook
-  become: true 
-  copy:
-    src: requirements-global.txt
-    dest: /home/ubuntu/requirements-global.txt
-- name: Create Python3-virtual requirements.txt
-  command: touch /home/ubuntu/venv/requirements.txt
-  args:
-    creates: /home/ubuntu/venv/requirements.txt
-- name: create virtual env
-  pip: 
-    virtualenv: /home/ubuntu/venv
-    virtualenv_python: python3.8
-    requirements: /home/ubuntu/venv/requirements.txt
+    dest: /opt/venv-requirements.txt
 
-- name: Install python reqs globally
-  pip: 
-    requirements: /home/ubuntu/requirements-global.txt
+- name: Criar o virtualenv (Python nativo) e instalar as dependencias
+  pip:
+    requirements: /opt/venv-requirements.txt
+    virtualenv: /opt/venv
+    virtualenv_command: /usr/bin/python3 -m venv
+
+- name: Garantir que o venv e acessivel a todos os usuarios do runner (inclusive gitlab-runner)
+  file:
+    path: /opt/venv
+    mode: '0755'
+    recurse: true

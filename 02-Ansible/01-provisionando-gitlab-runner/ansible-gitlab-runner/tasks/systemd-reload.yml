@@ -34,4 +34,4 @@
   become: yes
   systemd:
     daemon_reload: yes
-  when: gitlab_runner_exec_reload.changed or gitlab_runner_kill_timeout
+  when: gitlab_runner_exec_reload.changed or gitlab_runner_kill_timeout.changed

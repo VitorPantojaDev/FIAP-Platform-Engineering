@@ -23,7 +23,7 @@ resource "random_shuffle" "random_subnet" {
 resource "aws_instance" "example" {
   count                  = 1
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t2.micro"
+  instance_type          = "t3.small"
   iam_instance_profile   = "LabInstanceProfile"
   vpc_security_group_ids = [aws_security_group.gitlab-runner-fleet.id]
   subnet_id              = random_shuffle.random_subnet.result[0]
@@ -31,6 +31,14 @@ resource "aws_instance" "example" {
   # Sem key_name: nao ha mais SSH. Tanto o BOOTSTRAP (abaixo) quanto o proprio
   # Ansible (mais adiante no lab) acessam esta maquina via AWS Systems Manager
   # (SSM), usando o LabInstanceProfile. Sem chave, sem porta 22.
+
+  # Disco de 30GB: o runner roda Terraform (cada provider AWS ~600MB), Checkov,
+  # TFLint e varios pipelines do modulo 03. O root volume padrao da AMI (8GB)
+  # enche rapido e quebra o 'terraform init' com "no space left on device".
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
+  }
 
   tags = {
     Name = format("gitlab-runner-fleet-%03d", count.index + 1)

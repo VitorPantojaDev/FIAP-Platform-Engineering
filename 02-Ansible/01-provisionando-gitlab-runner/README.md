@@ -10,6 +10,8 @@
 Esse laboratório é o que vamos fazer juntos durante a aula: provisionar uma EC2 com Terraform, conectar essa máquina ao Ansible e rodar um playbook que a transforma num **GitLab Runner registrado** e dedicado a um projeto. No final, você terá feito tudo o que Helena precisava para parar de configurar servidor na mão.
 
 > Os comandos deste lab rodam em **dois lugares**: o **terminal do Codespaces** (onde estão Terraform e Ansible) e o **console web do GitLab** (onde você cria o projeto e gera o token). Cada passo indica onde executar. A chave SSH que você vai gerar serve **só** para autenticar o `git push` no GitLab — o acesso à EC2 do runner é feito via AWS Systems Manager (SSM), sem chave e sem porta 22.
+>
+> O **token de registro do runner** (um segredo) **não** é colado dentro de nenhum arquivo do projeto: você o guarda uma vez no **AWS SSM Parameter Store** (como `SecureString`) e o Ansible o lê em tempo de execução. Assim nenhum segredo entra no Git.
 
 > [!WARNING]
 > **Pré-requisitos obrigatórios antes de começar:**
@@ -17,7 +19,7 @@ Esse laboratório é o que vamos fazer juntos durante a aula: provisionar uma EC
 > - [ ] **Módulo 01 (Terraform) concluído** — você entende `init/plan/apply` e state remoto no S3
 > - [ ] Bucket de state remoto existe no S3 (`base-config-<SEU-RM>`, criado no [setup inicial](../../00-create-codespaces/README.md)) — este mesmo bucket é reutilizado pelo Ansible-via-SSM para transferir arquivos
 > - [ ] Credenciais AWS do Academy atualizadas no Codespaces (o acesso à EC2 é via SSM, então as credenciais AWS no ambiente são o que autentica a conexão)
-> - [ ] Ferramentas do Ansible-via-SSM instaladas no Codespaces (`session-manager-plugin`, `boto3`, collection `community.aws`) — você instala no **passo 3** mais abaixo
+> - [ ] Ferramentas do Ansible-via-SSM instaladas no Codespaces (`session-manager-plugin`, `boto3`, collections `community.aws` e `amazon.aws`) — você instala no **passo 3** mais abaixo
 > - [ ] Conta no [GitLab](https://gitlab.com/) (gratuita)
 >
 > **Valide rapidamente:**
@@ -40,10 +42,11 @@ Vamos separar com clareza **quem faz o quê**: o **Terraform** cria a EC2 e prep
 - preparar o Codespaces para conectar via SSM (`session-manager-plugin`, `boto3`, collection `community.aws`)
 - gerar e registrar uma chave SSH para autenticar o `git push` no GitLab
 - criar um projeto no GitLab e gerar um token de registro de runner
+- guardar esse token como segredo no **AWS SSM Parameter Store** (`SecureString`) em vez de hardcode no código
 - provisionar a EC2 do runner com Terraform usando state remoto no S3
 - conectar o Ansible ao host criado via inventário (`hosts`), usando o connection plugin `community.aws.aws_ssm` (sem chave SSH, sem porta 22)
-- rodar um playbook que instala, configura e **registra** o GitLab Runner
-- destruir a infraestrutura ao final para não deixar custo ligado
+- rodar um playbook que instala, configura e **registra** o GitLab Runner — lendo o token direto do SSM
+- deixar o runner de pé para o módulo 03 (a destruição da infra acontece ao final do Lab 03.2)
 
 ## O que você terá ao final
 
@@ -57,13 +60,12 @@ Ao final deste laboratório, você terá uma EC2 rodando como **GitLab Runner re
 | Parte | O que você faz | Passos | Tempo |
 |-------|----------------|--------|-------|
 | [Parte 1](#parte-1---preparando-o-ambiente) | Atualizar o repositório e entrar na pasta | [1](#passo-1) · [2](#passo-2) | ~3 min |
-| [Parte 2](#parte-2---instalando-ansible-python-e-virtualenv) | Instalar Python, Ansible, virtualenv e as ferramentas de SSM | [3](#passo-3) (3.1·3.2·3.3·3.4·3.5·3.6) | ~12 min |
+| [Parte 2](#parte-2---instalando-ansible-python-e-virtualenv) | Instalar Python, Ansible, virtualenv e as ferramentas de SSM | [3](#passo-3) (3.1·3.2·3.3·3.4·3.5) | ~12 min |
 | [Parte 3](#parte-3---configurando-o-acesso-ao-gitlab) | Conta GitLab e chave SSH | [4](#passo-4) · [5](#passo-5) (5.1–5.6) | ~10 min |
 | [Parte 4](#parte-4---criando-o-primeiro-projeto-no-gitlab) | Criar o projeto e subir o código | [6](#passo-6) · [7](#passo-7) · [8](#passo-8) · [9](#passo-9) (9.1–9.6) | ~10 min |
-| [Parte 5](#parte-5---gerando-o-token-do-runner) | Gerar o token e colá-lo no playbook | [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) | ~10 min |
+| [Parte 5](#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm) | Gerar o token e guardá-lo no SSM | [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) | ~10 min |
 | [Parte 6](#parte-6---provisionando-a-ec2-do-runner-com-terraform) | Provisionar a EC2 com Terraform | [17](#passo-17) · [18](#passo-18) · [19](#passo-19) · [20](#passo-20) · [21](#passo-21) · [22](#passo-22) | ~15 min |
 | [Parte 7](#parte-7---configurando-a-ec2-como-runner-com-ansible) | Rodar o playbook Ansible | [23](#passo-23) · [24](#passo-24) · [25](#passo-25) · [26](#passo-26) | ~10 min |
-| [Parte 8](#parte-8---destruindo-a-infraestrutura) | Destruir a infra ao final | [27](#passo-27) | ~3 min |
 
 > [!TIP]
 > Se travou em algum passo, você pode pular direto: clique no número do passo na coluna **Passos** acima.
@@ -141,7 +143,7 @@ cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runn
 
 ### Resultado esperado desta parte
 
-Ao final desta etapa, você terá Python atualizado, Ansible instalado, um virtualenv ativo e as ferramentas de conexão via SSM (`session-manager-plugin`, `boto3`, collection `community.aws`) prontas no terminal do Codespaces.
+Ao final desta etapa, você terá Python nativo confirmado, Ansible instalado, um virtualenv ativo e as ferramentas de conexão via SSM (`session-manager-plugin`, `boto3`, collections `community.aws` e `amazon.aws`) prontas no terminal do Codespaces.
 
 Esta parte é um único bloco grande no roteiro antigo. Vamos quebrá-la em sub-passos, cada um com uma validação rápida, para que — se algo falhar — você saiba exatamente onde travou.
 
@@ -151,74 +153,23 @@ Esta parte é um único bloco grande no roteiro antigo. Vamos quebrá-la em sub-
 
 **3.** Vamos instalar e preparar o ambiente do Ansible. Execute os sub-passos abaixo **na ordem**, no terminal do Codespaces.
 
-**3.1.** Atualize o sistema e instale o Python 3.8:
+**3.1.** Atualize o sistema, confirme o Python 3 nativo e instale o pacote de virtualenv:
 
 ```bash
 sudo apt update -y
-sudo apt install software-properties-common -y
-sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt install python3.8 -y
-sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
+sudo apt install -y python3 python3-pip python3-venv jq
+python3 --version
 ```
 
-Confirme que o Python responde:
+Deve imprimir `Python 3.10.x` ou mais recente. É esse Python nativo que vamos usar — não precisamos de PPA nem de versões antigas.
+
+**3.2.** Crie um ambiente Python isolado (virtualenv) com o Python nativo:
 
 ```bash
-python --version
-```
-
-Deve imprimir algo como `Python 3.8.x`.
-
-<details>
-<summary><b>⚠ Se der erro: <code>add-apt-repository: command not found</code></b></summary>
-<blockquote>
-
-O pacote `software-properties-common` não terminou de instalar. Rode novamente:
-
-```bash
-sudo apt update -y && sudo apt install software-properties-common -y
-```
-
-Depois repita o `add-apt-repository ppa:deadsnakes/ppa -y`.
-
-</blockquote>
-</details>
-
-**3.2.** Instale o Ansible:
-
-```bash
-sudo add-apt-repository --yes --update ppa:ansible/ansible -y
-sudo apt install ansible -y
-```
-
-Confirme a versão:
-
-```bash
-ansible --version
-```
-
-Deve imprimir a versão do Ansible e o caminho do executável.
-
-**3.3.** Instale o `pip3`:
-
-```bash
-sudo apt-get install python3-pip -y
-```
-
-Confirme:
-
-```bash
-pip3 --version
-```
-
-**3.4.** Instale o `virtualenv` e crie um ambiente isolado:
-
-```bash
-sudo pip3 install virtualenv
 python3 -m venv ~/venv
 ```
 
-**3.5.** Ative o virtualenv:
+**3.3.** Ative o virtualenv:
 
 ```bash
 source ~/venv/bin/activate
@@ -227,14 +178,14 @@ source ~/venv/bin/activate
 O prompt do terminal deve passar a exibir o prefixo `(venv)`. Esse prefixo confirma que o ambiente está ativo.
 
 <details>
-<summary><b>💡 Clique para entender: por que virtualenv</b></summary>
+<summary><b>💡 Clique para entender: por que virtualenv (e por que instalar o Ansible dentro dele)</b></summary>
 <blockquote>
 
 Um **virtualenv** é um diretório isolado com sua própria cópia do Python e dos pacotes. Em vez de instalar dependências "globalmente" no sistema (onde elas podem conflitar com outras ferramentas), você as mantém presas a um ambiente que pode ser ativado e desativado.
 
 O prefixo `(venv)` no prompt é o sinal de que tudo o que você instalar com `pip` daqui em diante fica dentro desse ambiente. Se você abrir um novo terminal, precisa rodar `source ~/venv/bin/activate` de novo — o ambiente não se ativa sozinho.
 
-Em projetos de plataforma e dados, isolar dependências por projeto é prática padrão: evita o clássico "funciona na minha máquina" causado por versões de pacote divergentes.
+**Por que instalamos o Ansible aqui dentro (via `pip`) e não pelo `apt`?** Porque o connection plugin do SSM e o *lookup* que lê o token precisam do `boto3` **no mesmo Python que executa o Ansible**. Se o Ansible viesse do `apt` (Python do sistema) e o `boto3` fosse instalado no venv, eles ficariam em Pythons diferentes e o Ansible reclamaria `Failed to import boto3`. Mantendo Ansible **e** boto3 dentro do venv, tudo roda no mesmo interpretador.
 
 Documentação oficial:
 - [venv — Python](https://docs.python.org/3/library/venv.html)
@@ -242,24 +193,26 @@ Documentação oficial:
 </blockquote>
 </details>
 
-**3.6.** Instale as ferramentas que o Ansible vai precisar para conectar na EC2 via **SSM** (sem chave SSH). Com o `(venv)` ativo, rode tudo de uma vez:
+**3.4.** Com o `(venv)` ativo, instale o Ansible, o `boto3`/`botocore` e as collections — tudo no mesmo Python do venv:
 
 ```bash
-# AWS CLI e jq
-command -v aws >/dev/null && command -v jq >/dev/null || sudo apt-get install -y jq
-# session-manager-plugin (necessário para o plugin aws_ssm do Ansible)
+pip install ansible boto3 botocore
+ansible-galaxy collection install community.aws amazon.aws
+```
+
+Confirme a versão (o caminho deve apontar para dentro de `~/venv`):
+
+```bash
+ansible --version
+```
+
+**3.5.** Instale o `session-manager-plugin`, que o Ansible usa para abrir a sessão SSM com a EC2 (o AWS CLI e o `jq` já vêm do devcontainer):
+
+```bash
 command -v session-manager-plugin >/dev/null || {
   curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
   sudo dpkg -i /tmp/smp.deb
 }
-# libs python e a collection do Ansible
-pip install boto3 botocore
-ansible-galaxy collection install community.aws
-```
-
-Confirme que o plugin do SSM ficou disponível:
-
-```bash
 session-manager-plugin --version
 ```
 
@@ -269,12 +222,13 @@ Deve imprimir um número de versão.
 <summary><b>💡 Clique para entender: por que estas ferramentas</b></summary>
 <blockquote>
 
-Neste lab o Ansible não acessa a EC2 por SSH — ele usa o connection plugin `community.aws.aws_ssm`, que conversa com a máquina através do **AWS Systems Manager**. Para isso funcionar, o Codespaces precisa de quatro peças:
+Neste lab o Ansible não acessa a EC2 por SSH — ele usa o connection plugin `community.aws.aws_ssm`, que conversa com a máquina através do **AWS Systems Manager**. Para isso funcionar, o Codespaces precisa destas peças:
 
 - **`aws` CLI e `jq`** — o devcontainer já instala estas duas; o comando acima só garante que `jq` existe (é usado pelo bootstrap do Terraform também).
 - **`session-manager-plugin`** — é o binário que o plugin `aws_ssm` chama por baixo para abrir a sessão SSM. Não vem no devcontainer; é específico deste lab.
 - **`boto3` / `botocore`** — SDK Python da AWS que o plugin `aws_ssm` usa para falar com a API do SSM e com o bucket S3.
 - **collection `community.aws`** — onde vive o próprio connection plugin `aws_ssm`. Sem ela, o `ansible_connection=community.aws.aws_ssm` do inventário não resolve.
+- **collection `amazon.aws`** — traz o *lookup* `ssm_parameter`, que o playbook usa para ler o token do runner do Parameter Store na hora de registrar (Parte 7).
 
 Tudo isso é redundante de propósito: se você pulou algum lab anterior, os comandos com `command -v ... ||` só instalam o que faltar.
 
@@ -287,11 +241,11 @@ Documentação oficial:
 
 ### Checkpoint
 
-- `python --version` responde 3.8.x
+- `python3 --version` responde 3.10.x ou mais recente
 - `ansible --version` responde sem erro
 - o prompt mostra `(venv)`
 - `session-manager-plugin --version` responde sem erro
-- `ansible-galaxy collection list community.aws` lista a collection instalada
+- `ansible-galaxy collection list community.aws amazon.aws` lista as duas collections instaladas
 
 ---
 
@@ -469,11 +423,11 @@ Deve responder com uma saudação contendo seu usuário. Se não, repita os sub-
 
 ---
 
-## Parte 5 - Gerando o token do runner
+## Parte 5 - Gerando o token do runner e guardando no SSM
 
 ### Resultado esperado desta parte
 
-Ao final desta etapa, você terá um token de registro de runner gerado no GitLab e colado no playbook Ansible.
+Ao final desta etapa, você terá um token de registro de runner gerado no GitLab e guardado com segurança no **AWS SSM Parameter Store** — sem colar segredo em nenhum arquivo do projeto.
 
 ---
 
@@ -515,6 +469,9 @@ Ao final desta etapa, você terá um token de registro de runner gerado no GitLa
 
 ![](img/gitlab-9-1.png)
 
+> [!IMPORTANT]
+> As **tags** do runner (`shell`, `terraform`) são definidas **aqui, na interface do GitLab** — e é assim que elas continuam valendo no fluxo atual. Desde o GitLab 16 o runner é criado primeiro na UI (gerando um token que começa com `glrt-`) e a máquina só se **vincula** a ele depois; as tags, o nível de acesso e o "run untagged" pertencem ao runner criado na UI, não ao comando de registro. Por isso é importante preencher as tags corretamente neste passo.
+
 ---
 
 <a id="passo-15"></a>
@@ -527,25 +484,58 @@ Ao final desta etapa, você terá um token de registro de runner gerado no GitLa
 
 <a id="passo-16"></a>
 
-**16.** De volta ao **Codespaces**, cole o token do GitLab no arquivo Ansible que registra o runner. Abra o arquivo e altere a **linha 48**, substituindo o placeholder `SEU TOKEN VAI AQUI` pelo token que você copiou. Não esqueça de salvar.
+**16.** De volta ao **Codespaces**, guarde o token no **AWS SSM Parameter Store** — não em um arquivo. Rode o comando abaixo trocando `glrt-COLE-SEU-TOKEN-AQUI` pelo token que você copiou (mantenha as aspas):
 
 ```bash
-code /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/ansible-gitlab-runner/tasks/register-runner.yml
+aws ssm put-parameter \
+  --name "/fiap/gitlab-runner/token" \
+  --type SecureString \
+  --value "glrt-COLE-SEU-TOKEN-AQUI" \
+  --region us-east-1 \
+  --overwrite
 ```
 
-A linha 48 deve ficar assim (com o seu token real no lugar do placeholder):
+Você deve ver uma resposta com `"Version": 1` (ou um número maior, se já tinha gravado antes). Confirme que o token ficou guardado:
 
-```yaml
-    --registration-token 'COLE-SEU-TOKEN-AQUI'
+```bash
+aws ssm get-parameter --name "/fiap/gitlab-runner/token" --with-decryption \
+  --region us-east-1 --query 'Parameter.Value' --output text
 ```
 
-> [!IMPORTANT]
-> O token é sensível: trate como senha. Em ambientes reais, ele viria de um cofre de segredos (ex: Ansible Vault, AWS Secrets Manager), nunca hardcoded no arquivo. Para o lab, colamos direto por simplicidade.
+Deve imprimir o seu token `glrt-...`. É esse parâmetro que o playbook vai ler automaticamente na hora de registrar o runner.
+
+<!-- PRINT SUGERIDO: img/ssm-parameter-token.png
+     Console AWS > Systems Manager > Parameter Store, mostrando o parametro
+     /fiap/gitlab-runner/token do tipo SecureString na lista. Enquadrar a coluna
+     Name e a coluna Type (SecureString). NAO mostrar o valor decifrado. -->
+![](img/ssm-parameter-token.png)
+
+<details>
+<summary><b>💡 Clique para entender: por que guardar o token no SSM Parameter Store</b></summary>
+<blockquote>
+
+O token de registro é um **segredo**: quem o tiver pode registrar runners no seu projeto. Colá-lo dentro de um arquivo `.yml` é perigoso — ele acabaria no histórico do Git, visível para sempre.
+
+O **SSM Parameter Store** é um cofre de parâmetros da AWS. Guardando o token como `SecureString`, ele fica **criptografado** e fora do código. Na hora de registrar o runner, o Ansible usa um *lookup* (`amazon.aws.ssm_parameter`) que lê o valor direto do Parameter Store — usando as suas credenciais AWS, as mesmas do resto do lab. Nenhum segredo entra no repositório.
+
+Esse é o padrão que você usaria de verdade num time de plataforma: segredos vivem num cofre (Parameter Store, Secrets Manager, Vault), nunca no código. Aqui você pratica isso com a ferramenta nativa da AWS, sem custo no Learner Lab.
+
+- `--type SecureString` — criptografa o valor em repouso.
+- `--name "/fiap/gitlab-runner/token"` — o caminho onde o playbook procura o token (definido em `play.yaml`).
+- `--overwrite` — permite regravar se você precisar gerar um token novo depois.
+
+Documentação oficial:
+- [aws ssm put-parameter](https://docs.aws.amazon.com/cli/latest/reference/ssm/put-parameter.html)
+- [amazon.aws.ssm_parameter lookup](https://docs.ansible.com/ansible/latest/collections/amazon/aws/ssm_parameter_lookup.html)
+
+</blockquote>
+</details>
 
 ### Checkpoint
 
-- o token foi gerado no GitLab
-- a linha 48 de `register-runner.yml` contém o seu token e o arquivo foi salvo
+- o token foi gerado no GitLab (com as tags `shell`, `terraform` na UI)
+- o token está guardado em `/fiap/gitlab-runner/token` no SSM Parameter Store (`get-parameter` imprime o seu `glrt-...`)
+- **nenhum** arquivo do projeto contém o token
 
 ---
 
@@ -644,7 +634,7 @@ terraform apply -auto-approve
 
 Repare na divisão de responsabilidades: o Terraform **cria** a EC2 (recurso de infraestrutura) e ainda roda um `install-python.sh` mínimo só para garantir que o Python existe — porque o Ansible precisa de Python no host de destino para funcionar.
 
-A novidade é **como** esse bootstrap chega na máquina: não há SSH nem chave. A EC2 sobe **sem `key_name`** e o Security Group **não abre a porta 22**. Em vez disso, o Terraform usa um `terraform_data` com `local-exec` que (1) espera o SSM Agent da instância reportar `Online`, (2) envia o `install-python.sh` por `aws ssm send-command` e (3) aborta o apply se o script falhar. Quem autentica tudo isso é o `LabInstanceProfile` anexado à EC2 mais as credenciais AWS do seu ambiente — por isso `aws` e `jq` são pré-requisitos (passo 3.6).
+A novidade é **como** esse bootstrap chega na máquina: não há SSH nem chave. A EC2 sobe **sem `key_name`** e o Security Group **não abre a porta 22**. Em vez disso, o Terraform usa um `terraform_data` com `local-exec` que (1) espera o SSM Agent da instância reportar `Online`, (2) envia o `install-python.sh` por `aws ssm send-command` e (3) aborta o apply se o script falhar. Quem autentica tudo isso é o `LabInstanceProfile` anexado à EC2 mais as credenciais AWS do seu ambiente — por isso `aws` e `jq` são pré-requisitos (passo 3.5).
 
 A configuração de verdade (instalar `gitlab-runner`, Terraform, ajustar o `systemd`, registrar o runner) fica para o **Ansible**, na próxima parte — que também conecta via SSM (plugin `community.aws.aws_ssm`). Essa separação "provisionar vs. configurar" é um dos padrões mais importantes de plataforma.
 
@@ -744,11 +734,14 @@ Documentação oficial:
 
 <a id="passo-25"></a>
 
-**25.** Execute o playbook que configura a EC2 como GitLab Runner. Como a conexão é via SSM, **não há `-u ubuntu` nem chave privada** — o Ansible usa as credenciais AWS já presentes no seu ambiente:
+**25.** Execute o playbook que configura a EC2 como GitLab Runner. Como a conexão é via SSM, **não há `-u ubuntu` nem chave privada** — o Ansible usa as credenciais AWS já presentes no seu ambiente. O **token do runner é lido automaticamente do SSM** (o que você gravou no passo 16); você não passa o token aqui:
 
 ```bash
 ansible-playbook -i hosts --extra-vars 'gitlab_runner_name=gitlab-runner-fleet-001' play.yaml
 ```
+
+> [!NOTE]
+> Logo no começo do registro, o playbook executa a task **"Ler o token do runner do SSM Parameter Store"**. Se você não gravou o token (passo 16), o playbook **para** com uma mensagem clara dizendo exatamente qual comando rodar — é o comportamento esperado (falhar cedo, não registrar um runner quebrado).
 
 ![](img/gitlab-14.png)
 
@@ -774,8 +767,8 @@ O Ansible não conseguiu chegar na EC2 via SSM. Verifique, na ordem:
 
 1. O **instance id no `hosts`** é exatamente o que `terraform output -raw instance_id` retornou (passo 22)?
 2. A EC2 já está `Online` no SSM? Logo após o `apply` ela costuma estar (o próprio bootstrap esperou o SSM ficar online), mas confirme com `aws ssm describe-instance-information --filters "Key=InstanceIds,Values=i-SEU-ID" --query 'InstanceInformationList[0].PingStatus'`.
-3. O `session-manager-plugin` está instalado? Confira com `session-manager-plugin --version` (passo 3.6).
-4. A collection `community.aws` e o `boto3` estão instalados no `(venv)` ativo (passo 3.6)?
+3. O `session-manager-plugin` está instalado? Confira com `session-manager-plugin --version` (passo 3.5).
+4. As collections `community.aws` e `amazon.aws` e o `boto3` estão instalados no `(venv)` ativo (passo 3.5)?
 5. O `ansible_aws_ssm_bucket_name` no `hosts` é um bucket **seu** e existente (`base-config-<RM>`)?
 6. Suas credenciais AWS estão válidas? Valide com `aws sts get-caller-identity`.
 
@@ -796,9 +789,9 @@ O Ansible não conseguiu chegar na EC2 via SSM. Verifique, na ordem:
 
 Quase sempre é o **token**. Verifique:
 
-1. A **linha 48** de `register-runner.yml` tem o token real, não o placeholder `SEU TOKEN VAI AQUI` (passo 16)?
+1. O token guardado no SSM está correto? Confira com `aws ssm get-parameter --name "/fiap/gitlab-runner/token" --with-decryption --region us-east-1 --query 'Parameter.Value' --output text` — deve imprimir o seu `glrt-...` (passo 16).
 2. O token foi gerado para **este** projeto (passo 13-15)? Tokens de runner são por projeto.
-3. Rode o playbook de novo (passo 25) — o registro é idempotente. Se o token estava errado, corrija a linha 48 e re-execute.
+3. Se o token estava errado, regrave no SSM com o mesmo `put-parameter --overwrite` do passo 16 e rode o playbook de novo (passo 25) — o registro é idempotente.
 
 </blockquote>
 </details>
@@ -810,44 +803,19 @@ Quase sempre é o **token**. Verifique:
 
 ---
 
-## Parte 8 - Destruindo a infraestrutura
-
-### Resultado esperado desta parte
-
-Ao final desta etapa, a EC2 do runner será destruída, zerando o custo.
-
----
-
-<a id="passo-27"></a>
-
-**27.** A EC2 do runner é infraestrutura **paga e ligada**. Assim que terminar de validar o runner, destrua tudo. Volte para a pasta do Terraform e rode o destroy:
-
-```bash
-cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/terraform-gitlab-runner/
-terraform destroy -auto-approve
-```
+## Conclusão
 
 > [!CAUTION]
-> **Destroy é obrigatório, não opcional.** A EC2 `t2.micro` custa ~$0,0116/h. Esquecê-la ligada por uma semana consome ~$2 do orçamento do Learner Lab — pouco, mas evitável. Diferente de "pausar", o `destroy` **zera** o custo e remove o recurso de verdade. O state remoto no S3 permanece e custa centavos.
-
-### Checkpoint
-
-- o `terraform destroy` terminou com `Destroy complete!`
-- a EC2 não aparece mais no console do EC2
-
----
-
-## Conclusão
+> **NÃO destrua o runner agora.** A EC2 que você acabou de configurar é o **mesmo runner que o módulo 03 (CI/CD) vai usar** para rodar os pipelines. Se você destruí-la aqui, o próximo módulo não terá runner e os pipelines ficarão presos em "stuck". O `terraform destroy` deste runner está no **final do Lab 03.2** — só rode lá, quando terminar o CI/CD. Rede, EC2 e o restante ficam de pé até lá. (A EC2 `t3.small` custa ~$0,02/h; ao terminar o módulo 03 você destrói e zera o custo.)
 
 Se você chegou até aqui, então já executou:
 
 - instalação de Python, Ansible, virtualenv e as ferramentas de SSM num ambiente isolado
 - geração de chave SSH e registro no GitLab (para o `git push`)
 - criação de projeto no GitLab e push do código via SSH
-- geração do token de registro do runner
+- geração do token de registro do runner e armazenamento seguro no SSM Parameter Store (sem hardcode)
 - provisionamento da EC2 com Terraform usando state remoto no S3, com bootstrap via SSM
 - configuração da EC2 como GitLab Runner via playbook Ansible, conectando via SSM (sem chave, sem porta 22)
-- destruição da infraestrutura ao final
 
 **Mensagem para Helena**: o runner da Vortex agora sobe por código. O "documento de 30 passos" virou um `terraform apply` seguido de um `ansible-playbook` — qualquer pessoa do time sobe um runner idêntico, e o Ansible garante que rodar de novo não quebra nada. Está pronto para automatizar os deploys no módulo de CI/CD.
 
@@ -875,10 +843,11 @@ Lá Diego volta com uma demanda: *"Temos o runner. Agora quero que todo push na 
 | **Inventário (`hosts`)** | Arquivo que lista quais máquinas o Ansible gerencia e como conectar. Aqui: o instance id da EC2 e a conexão via SSM (sem IP, sem chave SSH). |
 | **SSM (AWS Systems Manager)** | Serviço da AWS que permite acessar e rodar comandos numa EC2 sem SSH, sem chave e sem porta 22. O acesso à EC2 do runner (bootstrap do Terraform e conexão do Ansible) é todo via SSM. |
 | **`community.aws.aws_ssm`** | Connection plugin do Ansible que conecta na EC2 através do SSM em vez de SSH. Usa um bucket S3 para transferir arquivos. |
-| **`session-manager-plugin`** | Binário local que o plugin `aws_ssm` usa para abrir a sessão SSM com a EC2. Instalado no passo 3.6. |
+| **`session-manager-plugin`** | Binário local que o plugin `aws_ssm` usa para abrir a sessão SSM com a EC2. Instalado no passo 3.5. |
 | **Idempotência** | Propriedade de rodar a mesma operação várias vezes sem efeitos colaterais. Aplicar o playbook duas vezes não duplica nada. |
 | **GitLab Runner** | Processo que executa os jobs de um pipeline de CI/CD. Aqui, dedicado a um único projeto. |
-| **Token de registro** | Segredo gerado pelo GitLab que autentica e vincula um runner a um projeto. |
+| **Token de registro** | Segredo gerado pelo GitLab que autentica e vincula um runner a um projeto. No GitLab 16+ começa com `glrt-` e é criado junto com o runner na UI. |
+| **SSM Parameter Store** | Cofre de parâmetros da AWS. Guardamos o token do runner como `SecureString` (criptografado) e o Ansible o lê em runtime, sem hardcode no código. |
 | **virtualenv** | Ambiente Python isolado, com pacotes próprios, ativado por `source ~/venv/bin/activate`. |
 | **State remoto (S3)** | Arquivo de estado do Terraform guardado num bucket S3, para colaboração sem corromper o estado local. |
 | **Bootstrap (Terraform via SSM)** | Etapa em que o Terraform envia o `install-python.sh` para a EC2 por `aws ssm send-command`, garantindo Python/pip/awscli antes do Ansible. Configuração de verdade fica no Ansible. |
@@ -902,7 +871,7 @@ Canais (em ordem de prioridade):
 - **Issues do repositório**: [github.com/vamperst/FIAP-Platform-Engineering/issues](https://github.com/vamperst/FIAP-Platform-Engineering/issues)
 - **E-mail do professor**: `Rafael@rfbarbosa.com`
 - **LinkedIn**: [rafael-barbosa-serverless](https://www.linkedin.com/in/rafael-barbosa-serverless/)
-- **Antes de tudo**: confira se o instance id em `hosts` bate com o `terraform output -raw instance_id` e se o `session-manager-plugin` está instalado (passo 3.6) — são as causas mais comuns de `UNREACHABLE` na conexão via SSM.
+- **Antes de tudo**: confira se o instance id em `hosts` bate com o `terraform output -raw instance_id` e se o `session-manager-plugin` está instalado (passo 3.5) — são as causas mais comuns de `UNREACHABLE` na conexão via SSM.
 
 </blockquote>
 </details>

@@ -11,6 +11,19 @@
     home: "/home/{{ gitlab_runner_user }}"
   register: user_created
 
+# O shell executor do GitLab roda os jobs num shell de LOGIN, que processa o
+# .bash_logout do usuario. O .bash_logout padrao do Ubuntu chama 'clear_console',
+# que falha sem TTY e quebra TODO job com "prepare environment: exit status 1".
+# Esvaziamos o arquivo para o pipeline do modulo 03 funcionar.
+# Ref: https://docs.gitlab.com/runner/shells/#shell-profile-loading
+- name: Neutralizar o .bash_logout do gitlab-runner (evita falha do shell executor)
+  copy:
+    dest: "/home/{{ gitlab_runner_user }}/.bash_logout"
+    content: ""
+    owner: "{{ gitlab_runner_user }}"
+    group: "{{ gitlab_runner_user }}"
+    mode: '0644'
+
 - name: Download GitLab Runner
   get_url:
     url: "https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-amd64"
