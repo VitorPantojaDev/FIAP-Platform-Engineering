@@ -154,36 +154,23 @@ Esta parte é um único bloco grande no roteiro antigo. Vamos quebrá-la em sub-
 
 **3.** Vamos instalar e preparar o ambiente do Ansible. Execute os sub-passos abaixo **na ordem**, no terminal do Codespaces.
 
-**3.1.** Atualize o sistema e confirme que o Python 3 nativo está disponível (o Codespaces já vem com ele):
+**3.1.** Atualize o sistema, confirme o Python 3 nativo e instale o pacote de virtualenv:
 
 ```bash
 sudo apt update -y
+sudo apt install -y python3 python3-pip python3-venv jq
 python3 --version
 ```
 
 Deve imprimir `Python 3.10.x` ou mais recente. É esse Python nativo que vamos usar — não precisamos de PPA nem de versões antigas.
 
-**3.2.** Instale o Ansible e o pacote de virtualenv:
-
-```bash
-sudo apt install -y ansible python3-pip python3-venv
-```
-
-Confirme a versão:
-
-```bash
-ansible --version
-```
-
-Deve imprimir a versão do Ansible e o caminho do executável.
-
-**3.3.** Crie um ambiente Python isolado (virtualenv) com o Python nativo:
+**3.2.** Crie um ambiente Python isolado (virtualenv) com o Python nativo:
 
 ```bash
 python3 -m venv ~/venv
 ```
 
-**3.4.** Ative o virtualenv:
+**3.3.** Ative o virtualenv:
 
 ```bash
 source ~/venv/bin/activate
@@ -192,14 +179,14 @@ source ~/venv/bin/activate
 O prompt do terminal deve passar a exibir o prefixo `(venv)`. Esse prefixo confirma que o ambiente está ativo.
 
 <details>
-<summary><b>💡 Clique para entender: por que virtualenv</b></summary>
+<summary><b>💡 Clique para entender: por que virtualenv (e por que instalar o Ansible dentro dele)</b></summary>
 <blockquote>
 
 Um **virtualenv** é um diretório isolado com sua própria cópia do Python e dos pacotes. Em vez de instalar dependências "globalmente" no sistema (onde elas podem conflitar com outras ferramentas), você as mantém presas a um ambiente que pode ser ativado e desativado.
 
 O prefixo `(venv)` no prompt é o sinal de que tudo o que você instalar com `pip` daqui em diante fica dentro desse ambiente. Se você abrir um novo terminal, precisa rodar `source ~/venv/bin/activate` de novo — o ambiente não se ativa sozinho.
 
-Em projetos de plataforma e dados, isolar dependências por projeto é prática padrão: evita o clássico "funciona na minha máquina" causado por versões de pacote divergentes.
+**Por que instalamos o Ansible aqui dentro (via `pip`) e não pelo `apt`?** Porque o connection plugin do SSM e o *lookup* que lê o token precisam do `boto3` **no mesmo Python que executa o Ansible**. Se o Ansible viesse do `apt` (Python do sistema) e o `boto3` fosse instalado no venv, eles ficariam em Pythons diferentes e o Ansible reclamaria `Failed to import boto3`. Mantendo Ansible **e** boto3 dentro do venv, tudo roda no mesmo interpretador.
 
 Documentação oficial:
 - [venv — Python](https://docs.python.org/3/library/venv.html)
@@ -207,24 +194,26 @@ Documentação oficial:
 </blockquote>
 </details>
 
-**3.5.** Instale as ferramentas que o Ansible vai precisar para conectar na EC2 via **SSM** (sem chave SSH). Com o `(venv)` ativo, rode tudo de uma vez:
+**3.4.** Com o `(venv)` ativo, instale o Ansible, o `boto3`/`botocore` e as collections — tudo no mesmo Python do venv:
 
 ```bash
-# AWS CLI e jq
-command -v aws >/dev/null && command -v jq >/dev/null || sudo apt-get install -y jq
-# session-manager-plugin (necessário para o plugin aws_ssm do Ansible)
+pip install ansible boto3 botocore
+ansible-galaxy collection install community.aws amazon.aws
+```
+
+Confirme a versão (o caminho deve apontar para dentro de `~/venv`):
+
+```bash
+ansible --version
+```
+
+**3.5.** Instale o `session-manager-plugin`, que o Ansible usa para abrir a sessão SSM com a EC2 (o AWS CLI e o `jq` já vêm do devcontainer):
+
+```bash
 command -v session-manager-plugin >/dev/null || {
   curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/smp.deb
   sudo dpkg -i /tmp/smp.deb
 }
-# libs python e as collections do Ansible
-pip install boto3 botocore
-ansible-galaxy collection install community.aws amazon.aws
-```
-
-Confirme que o plugin do SSM ficou disponível:
-
-```bash
 session-manager-plugin --version
 ```
 
