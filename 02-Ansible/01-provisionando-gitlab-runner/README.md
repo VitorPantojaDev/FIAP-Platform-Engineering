@@ -378,12 +378,31 @@ cp -frv /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab
 cd /home/vscode/environment/primeiro-projeto
 ```
 
-**9.4.** Inicialize o repositório e aponte para o seu projeto no GitLab (troque `SEU-USUARIO`):
+**9.4.** Inicialize o repositório e aponte para o seu projeto no GitLab. O comando abaixo **descobre seu usuário do GitLab automaticamente** (a partir da chave SSH que você carregou no passo 5.6) e monta a URL do remote:
 
 ```bash
 git init
-git remote add origin git@gitlab.com:SEU-USUARIO/primeiro-projeto.git
+GLUSER=$(ssh -o StrictHostKeyChecking=accept-new -T git@gitlab.com 2>&1 | sed -n 's/.*@\([A-Za-z0-9._-]*\)!.*/\1/p')
+git remote add origin git@gitlab.com:$GLUSER/primeiro-projeto.git
+git remote -v
 ```
+
+O `git remote -v` deve mostrar `git@gitlab.com:SEU-USUARIO/primeiro-projeto.git` já com o seu usuário.
+
+<details>
+<summary><b>⚠ Se o <code>git remote -v</code> mostrar a URL sem o usuário (<code>git@gitlab.com:/primeiro-projeto.git</code>)</b></summary>
+<blockquote>
+
+A chave SSH não está carregada na sessão (o `ssh -T` não conseguiu se identificar). Refaça o passo 5.6 (`eval $(ssh-agent -s)` + `ssh-add`) **neste terminal** e então corrija o remote:
+
+```bash
+GLUSER=$(ssh -T git@gitlab.com 2>&1 | sed -n 's/.*@\([A-Za-z0-9._-]*\)!.*/\1/p')
+git remote set-url origin git@gitlab.com:$GLUSER/primeiro-projeto.git
+git remote -v
+```
+
+</blockquote>
+</details>
 
 **9.5.** Adicione e faça o commit inicial:
 

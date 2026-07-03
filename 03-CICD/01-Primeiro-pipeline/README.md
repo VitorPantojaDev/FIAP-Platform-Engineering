@@ -110,7 +110,7 @@ Ao final desta etapa, você terá entendido o que o código do `primeiro-projeto
 **1.** No terminal do Codespaces, entre na pasta do repositório `primeiro-projeto` (o mesmo que você criou no módulo 02):
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/primeiro-projeto
+cd /home/vscode/environment/primeiro-projeto
 ```
 
 <details>
@@ -147,16 +147,30 @@ A API expõe três rotas: listar todas as scooters (`GET /scooters`), consultar 
 
 <a id="passo-3"></a>
 
-**3.** Confirme que o `state.tf` aponta para o **seu** bucket de estado remoto. Abra o arquivo:
+**3.** O `state.tf` precisa apontar para o **seu** bucket de estado remoto (`base-config-<SEU-RM>`, o mesmo das demos anteriores). Em vez de editar na mão, o comando abaixo **descobre o seu bucket automaticamente** e o grava no `state.tf`:
 
 ```bash
-code state.tf
+BUCKET=$(aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1)
+sed -i "s/base-config-SEU-RM/$BUCKET/" state.tf
+grep bucket state.tf
 ```
 
-Verifique que o nome do bucket é o mesmo que você usou para guardar o estado nas demos anteriores (algo como `base-config-<SEU-RM>`). Se estiver diferente, ajuste e salve.
+O `grep` no final deve mostrar `bucket = "base-config-<SEU-RM>"` já com o nome do seu bucket — confirme que não sobrou o placeholder `SEU-RM`.
 
 > [!IMPORTANT]
-> O `terraform apply` no pipeline vai usar esse estado remoto. Se o bucket estiver errado, o pipeline vai falhar no `init`. Confira **agora** — falhar cedo aqui custa 30 segundos; descobrir depois custa um pipeline vermelho.
+> O `terraform apply` no pipeline vai usar esse estado remoto. Se o bucket estiver errado, o pipeline falha no `init`. Por isso descobrimos o nome por comando — evita o erro de digitação que é a causa nº 1 de pipeline vermelho no `init`.
+
+<details>
+<summary><b>💡 Clique para entender: o que esse comando faz</b></summary>
+<blockquote>
+
+- `aws s3 ls | awk '{print $3}' | grep '^base-config' | head -1` lista seus buckets, isola o nome e filtra o do curso.
+- `sed -i "s/base-config-SEU-RM/$BUCKET/" state.tf` grava o nome real no lugar do placeholder, direto no arquivo.
+
+Fazemos assim porque o backend do Terraform **não aceita variável** no nome do bucket — o valor precisa ser literal no `state.tf`. Se você tiver mais de um bucket `base-config`, o comando pega o primeiro; confira o `grep` e, se pegou o errado, ajuste com `code state.tf`.
+
+</blockquote>
+</details>
 
 ### Checkpoint
 
@@ -359,31 +373,61 @@ Explore os logs de cada stage. Repare que o log do `plan` mostra o preview das m
 
 <a id="passo-10"></a>
 
-**10.** Copie a **URL da API** que apareceu no final do log do stage `apply` (a saída `api_base_url`, algo como `https://xxxxxx.execute-api.us-east-1.amazonaws.com/`).
+**10.** Pegue a **URL da API** direto do Terraform — sem precisar abrir o log do pipeline. No **terminal do Codespaces**, na pasta do projeto (`~/environment/primeiro-projeto`), rode:
 
-<!-- PRINT SUGERIDO: img/apigw-url-no-log.png
-     Final do log do stage apply no GitLab, destacando a linha de Outputs com
-     api_base_url = "https://....execute-api.us-east-1.amazonaws.com/". Enquadrar
-     so essa secao de Outputs do terraform apply. -->
-![](img/apigw-url-no-log.png)
+```bash
+terraform init -input=false >/dev/null
+API_URL=$(terraform output -raw api_base_url | sed 's:/*$::')
+echo "$API_URL"
+```
+
+O `echo` mostra a URL (algo como `https://xxxxxx.execute-api.us-east-1.amazonaws.com`), e ela fica guardada na variável `API_URL` para o próximo passo.
+
+<details>
+<summary><b>💡 Clique para entender: por que dá para pegar a URL aqui, sem o log</b></summary>
+<blockquote>
+
+O `apply` rodou **no runner**, mas o **estado** foi gravado no seu bucket S3 (o `state.tf` do projeto aponta para lá). Quando você roda `terraform init` nesta pasta, o Terraform se conecta a esse mesmo estado remoto; o `terraform output -raw api_base_url` então **lê o valor que o pipeline produziu** — a URL da API — direto do estado, sem você ter que caçar no log.
+
+É por isso que declaramos `api_base_url` como um `output` no `outputs.tf`: outputs existem justamente para expor "resultados" da infra de forma programática, prontos para usar em scripts (aqui, num `curl`).
+
+Documentação oficial:
+- [`terraform output`](https://developer.hashicorp.com/terraform/cli/commands/output)
+
+</blockquote>
+</details>
 
 ---
 
 <a id="passo-11"></a>
 
-**11.** No **terminal do Codespaces**, teste a API que o pipeline acabou de subir. Troque `<URL_DA_API>` pela URL que você copiou:
+**11.** Ainda no **mesmo terminal** (a variável `API_URL` do passo 10 continua válida), teste a API que o pipeline subiu:
 
 ```bash
 # Registra o status de uma scooter (PUT)
-curl -X PUT "<URL_DA_API>/scooters/VORTEX-SP-001" \
+curl -X PUT "$API_URL/scooters/VORTEX-SP-001" \
   -H 'Content-Type: application/json' \
   -d '{"status":"in_use"}'
+echo
 
 # Lista todas as scooters (GET)
-curl "<URL_DA_API>/scooters"
+curl "$API_URL/scooters"
+echo
 ```
 
 Você deve ver respostas em JSON: primeiro `{"updated": {...}}` e depois a lista com a scooter que você acabou de registrar. **A API que o pipeline subiu está no ar, sem ninguém ter rodado `apply` na mão.**
+
+<details>
+<summary><b>⚠ Se o <code>API_URL</code> aparecer vazio no passo 10</b></summary>
+<blockquote>
+
+Duas causas comuns:
+
+- Você não está na pasta do projeto (`cd ~/environment/primeiro-projeto`) ou o `terraform init` falhou — confirme que o `state.tf` aponta para o seu bucket (passo 3) e rode o `init` de novo.
+- O pipeline ainda não terminou o `apply` — espere o stage `apply` ficar verde no GitLab e rode o passo 10 novamente.
+
+</blockquote>
+</details>
 
 <!-- PRINT SUGERIDO: img/curl-api-respondendo.png
      Terminal do Codespaces mostrando o resultado dos dois curl: o PUT retornando
@@ -417,7 +461,7 @@ O artefato `build/` não viajou do `plan` para o `apply`. Confirme que o bloco `
 Se você chegou até aqui, então:
 
 - o pipeline terminou verde (stages `plan` e `apply` com sucesso)
-- a saída `api_base_url` apareceu no log do `apply`
+- `terraform output -raw api_base_url` devolveu a URL da API (lida do estado remoto)
 - o `curl` na API retornou JSON — a API está no ar
 
 ---
