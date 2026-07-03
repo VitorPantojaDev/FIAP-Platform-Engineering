@@ -113,7 +113,7 @@ Ao final desta etapa, o `primeiro-projeto` terá um arquivo de teste nativo do T
 **1.** Continuando no repositório `primeiro-projeto`, entre na pasta do projeto e crie a pasta de testes:
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/primeiro-projeto
+cd /home/vscode/environment/primeiro-projeto
 mkdir -p tests
 code tests/api.tftest.hcl
 ```
@@ -423,7 +423,7 @@ Ao final desta etapa, você terá lido o relatório gerado pelo Checkov e pelo T
 
 <a id="passo-9"></a>
 
-**9.** Cada linha corresponde a uma política avaliada contra o seu código. Repare que o relatório aponta **quais** checks passaram e falharam — esse é o material que você levaria para uma revisão de segurança, concreto e gerado automaticamente a cada push:
+**9.** Clique em **`Checkov`** Cada linha corresponde a uma política avaliada contra o seu código. Repare que o relatório aponta **quais** checks passaram e falharam — esse é o material que você levaria para uma revisão de segurança, concreto e gerado automaticamente a cada push:
 
 ![](img/gitlab-4.png)
 
@@ -456,7 +456,7 @@ Ao final desta etapa, a API serverless **e o runner** (a EC2 do módulo 02) ter�
 **10.** Destrua a **API serverless** do `primeiro-projeto`. No terminal do Codespaces:
 
 ```bash
-cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/primeiro-projeto
+cd /home/vscode/environment/primeiro-projeto
 terraform destroy -auto-approve
 ```
 
