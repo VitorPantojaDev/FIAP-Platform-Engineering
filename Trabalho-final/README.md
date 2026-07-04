@@ -16,10 +16,10 @@ Este é o **Trabalho Final** da disciplina. Ele consolida tudo que você pratico
 > **Pré-requisitos obrigatórios antes de começar:**
 >
 > - [ ] Módulo **01 - Terraform** concluído (você sabe rodar `plan`/`apply`, criar módulos, usar `count`, state remoto no S3 e workspaces)
-> - [ ] Módulo **02 - Ansible** concluído (você tem um **GitLab Runner próprio** provisionado e registrado)
+> - [ ] Módulo **02 - Ansible** concluído (você entende como o GitLab Runner é provisionado — aqui você **não** o sobe na mão, um script faz isso na Parte 0)
 > - [ ] Módulo **03 - CI/CD** concluído (você fez ao menos um pipeline rodar `plan`/`apply` com etapa de validação)
-> - [ ] Credenciais AWS do Academy atualizadas no Codespaces — ver [Preparando Credenciais](../00-create-codespaces/Inicio-de-aula.md)
-> - [ ] Acesso ao seu GitLab com permissão para criar repositório e variáveis de CI/CD
+> - [ ] Credenciais AWS do Academy atualizadas no Codespaces
+> - [ ] Acesso ao seu GitLab com permissão para criar repositório e runner
 >
 > **Valide rapidamente que o essencial está de pé:**
 >
@@ -28,7 +28,7 @@ Este é o **Trabalho Final** da disciplina. Ele consolida tudo que você pratico
 > terraform -version
 > ```
 >
-> Se o primeiro retornar o JSON com seu `Account`/`Arn` e o segundo mostrar `Terraform v1.15.x`, você está pronto. O Runner do Módulo 02 deve aparecer como **online** em **Settings → CI/CD → Runners** no seu projeto GitLab.
+> Se o primeiro retornar o JSON com seu `Account`/`Arn` e o segundo mostrar `Terraform v1.10` ou superior, você está pronto.
 >
 > **Tempo estimado total: 4 a 6 horas** (execução pura ~1h30 + tempo para escrever o `DECISION.md`, depurar o pipeline, observar os jobs no GitLab e validar `dev`/`prod`). Recomendamos dividir em duas sessões.
 
@@ -41,7 +41,7 @@ Provar — com um artefato funcional e um documento de decisão — que a infrae
 Ao final, você terá um **repositório GitLab** que:
 
 - transforma a demo Count em um **módulo Terraform reutilizável** que recebe a quantidade de nós atrás do load balancer como parâmetro;
-- nomeia os recursos por **workspace/ambiente** (ex: `nginx-prod-002`, `elb-dev`, `sg-prod`);
+- nomeia os recursos por **workspace/ambiente** (ex: `nginx-prod-002`, `alb-dev`, `vortex-sg-prod`);
 - guarda o **estado remoto no S3**, permitindo trabalho em time sem corromper o `terraform.tfstate`;
 - separa **dev** e **prod** em workspaces distintos;
 - roda um **pipeline de 3 etapas** (validar → revisar/gate de segurança → aplicar) no seu GitLab Runner;
@@ -54,6 +54,7 @@ Ao final, você terá um **repositório GitLab** que:
 
 | Parte | O que você faz | Requisitos | Tempo |
 |-------|----------------|------------|-------|
+| [Parte 0](#parte-0---preparação-provisionamento-entregue) | Preparação: projeto GitLab + runner (script pronto) | [P1](#prep-1) · [P2](#prep-2) · [P3](#prep-3) · [P4](#prep-4) | ~20 min |
 | [Parte 1](#parte-1---modularizar-a-demo-count) | Modularizar a demo Count | [1](#req-1) · [2](#req-2) | ~60 min |
 | [Parte 2](#parte-2---estado-remoto-e-ambientes-devprod) | Estado remoto e ambientes dev/prod | [3](#req-3) · [4](#req-4) · [5](#req-5) · [6](#req-6) | ~60 min |
 | [Parte 3](#parte-3---pipeline-de-cicd-end-to-end) | Pipeline de CI/CD end-to-end | [7](#req-7) · [8](#req-8) | ~90 min |
@@ -63,27 +64,11 @@ Ao final, você terá um **repositório GitLab** que:
 > [!TIP]
 > Se travou em algum requisito, clique no número na coluna **Requisitos** acima para ir direto.
 
-## Como você será avaliado
-
-A nota é composta pelos critérios abaixo. Cada critério tem um **peso** e três níveis de qualidade. Leia esta tabela **antes** de começar — ela diz exatamente o que se espera do entregável.
-
-| # | Critério | Peso | Insatisfatório (0%) | Parcial (60%) | Completo (100%) |
-|---|----------|------|---------------------|---------------|-----------------|
-| C1 | **Modularização** (Req. 1-2) | 20% | Código continua monolítico, sem módulo | Existe módulo, mas a quantidade de nós é hardcoded | Módulo recebe `node_count` como variável e é chamado por um arquivo raiz |
-| C2 | **Estado remoto no S3** (Req. 3) | 15% | State local (`terraform.tfstate` no repo) | Backend S3 declarado mas não funciona / bucket inválido | Backend S3 configurado e `terraform init` migra o state com sucesso |
-| C3 | **Nomeação por workspace** (Req. 4-5) | 15% | Nomes fixos, sem workspace | Só parte dos recursos usa o workspace no nome | EC2, ELB e Security Group carregam o workspace no nome (ex: `nginx-prod-002`) |
-| C4 | **Ambientes dev/prod** (Req. 6) | 10% | Um único ambiente | Workspaces criados mas idênticos | `dev` e `prod` existem e se diferenciam (ex: nº de nós) |
-| C5 | **Pipeline de CI/CD** (Req. 7-8) | 25% | Sem pipeline / não roda | Pipeline roda mas falta etapa ou não usa o Runner próprio | 3 etapas (validar → gate → aplicar) verdes no seu Runner, EC2s no ar e relatório anexado |
-| C6 | **Documento de decisão (ADR)** (Req. 9) | 15% | Ausente ou em branco | Preenchido parcialmente, sem justificar trade-offs | `DECISION.md` completo: contexto, decisão, alternativas descartadas, consequências |
-
-> [!NOTE]
-> O gate de segurança (etapa 2 do pipeline) é o coração do critério C5. Ele deve **barrar** uma configuração insegura **antes** de chegar à AWS — exatamente o que Diego pediu no Mês 3. Um pipeline que aplica sem nenhuma validação prévia não atinge o nível Completo.
-
 ## Contexto
 
 Nos módulos anteriores cada conceito foi praticado de forma isolada: um lab para `count`, um lab para state remoto, um lab para o pipeline. No mundo real, esses pedaços precisam coexistir no **mesmo repositório**, governados pelo mesmo fluxo. O Trabalho Final existe para forçar essa integração — é o exercício que mais se parece com o trabalho do dia a dia de um Platform Engineer: pegar peças soltas e transformá-las em um sistema reproduzível.
 
-A base de código é a **demo Count** do módulo 01 ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)): ela já cria N instâncias EC2 com Nginx atrás de um Elastic Load Balancer. Seu trabalho é evoluí-la de "demo que roda na sua máquina" para "projeto que roda sozinho via pipeline, em dois ambientes, com histórico auditável".
+A base de código é a **demo Count** do módulo 01 ([`01-Terraform/demos/03-Count`](../01-Terraform/demos/03-Count/README.md)): ela já cria N instâncias EC2 com Nginx atrás de um **Application Load Balancer (ALB)**. Seu trabalho é evoluí-la de "demo que roda na sua máquina" para "projeto que roda sozinho via pipeline, em dois ambientes, com histórico auditável".
 
 <details>
 <summary><b>💡 Clique para entender: por que essa integração existe</b></summary>
@@ -106,6 +91,91 @@ Documentação oficial:
 
 ---
 
+## Parte 0 - Preparação (provisionamento entregue)
+
+### Resultado esperado desta parte
+
+Seu **runner próprio** de pé e **online** no GitLab, pronto para rodar o pipeline — sem você configurar servidor na mão. Esta parte **não é o foco do trabalho** (subir o runner você já aprendeu no Módulo 02); por isso ela é a mais automatizada possível: você cria o projeto, gera o token e roda **um script** que provisiona tudo.
+
+> [!NOTE]
+> O que **vale nota** no Trabalho Final é o **código** que você escreve a partir da Parte 1 (o módulo Terraform, os workspaces e o `.gitlab-ci.yml`). O provisionamento do runner é só o palco — deixamos pronto de propósito para você gastar seu tempo no que importa.
+
+---
+
+<a id="prep-1"></a>
+
+**Passo 0.1.** No **GitLab**, crie um **projeto novo** para este trabalho (ex: `trabalho-final`). Guarde a URL SSH dele — você vai usá-la na Parte 3 para dar `push` no código.
+
+---
+
+<a id="prep-2"></a>
+
+**Passo 0.2.** Ainda no GitLab, em **Settings → CI/CD → Runners**, clique em **Create project runner**, marque as tags `shell` e `terraform` e **copie o token** (`glrt-...`). É o mesmo fluxo do [Módulo 02](../02-Ansible/01-provisionando-gitlab-runner/README.md#parte-5---gerando-o-token-do-runner-e-guardando-no-ssm) — como o projeto é novo, o token também é novo.
+
+---
+
+<a id="prep-3"></a>
+
+**Passo 0.3.** No **terminal do Codespaces**, guarde o token no **SSM Parameter Store** (o script e o playbook leem dele — nada de segredo em arquivo). Troque `glrt-COLE-SEU-TOKEN-AQUI` pelo token do passo 0.2:
+
+```bash
+aws ssm put-parameter \
+  --name "/fiap/gitlab-runner/token" \
+  --type SecureString \
+  --value "glrt-COLE-SEU-TOKEN-AQUI" \
+  --region us-east-1 \
+  --overwrite
+```
+
+---
+
+<a id="prep-4"></a>
+
+**Passo 0.4.** Rode o script de provisionamento. Ele instala o tooling, sobe a EC2 do runner e a configura via Ansible — **tudo em um comando** (leva ~5 min):
+
+```bash
+bash /workspaces/FIAP-Platform-Engineering/Trabalho-final/provisionamento/subir-runner.sh
+```
+
+Ao terminar, confirme em **Settings → CI/CD → Runners** que o runner aparece **online**.
+
+<details>
+<summary><b>💡 Clique para entender: o que o script faz (e por que ele existe)</b></summary>
+<blockquote>
+
+O `subir-runner.sh` reaproveita **o mesmo código do Módulo 02** (o Terraform da EC2 + o playbook Ansible). Ele: descobre seu bucket de state, confirma o token no SSM, prepara o Ansible (venv + `boto3` + collections + `session-manager-plugin`), sobe a EC2 (`terraform apply`) e registra o runner (`ansible-playbook`, conectando via SSM — sem SSH).
+
+Por que entregar isso pronto? Porque **subir o runner não é o que este trabalho avalia** — você já fez isso no Módulo 02. O valor do Trabalho Final está no código que vem a seguir. Automatizar o palco tira fricção do que não gera nota.
+
+O runner roda numa EC2 com o `LabRole` (instance profile), então o `terraform` do pipeline já terá acesso à AWS **sem** nenhuma credencial no GitLab.
+
+</blockquote>
+</details>
+
+<details>
+<summary><b>⚠ Se der erro: <code>token nao encontrado</code> ou <code>bucket base-config-* nao encontrado</code></b></summary>
+<blockquote>
+
+- **Token**: refaça o passo 0.3 (o `put-parameter`). Confira com `aws ssm get-parameter --name /fiap/gitlab-runner/token --with-decryption --region us-east-1 --query 'Parameter.Value' --output text`.
+- **Bucket**: o script procura um bucket começando com `base-config`. Confirme que o bucket do setup (Módulo 01) existe: `aws s3 ls | grep base-config`.
+
+</blockquote>
+</details>
+
+### Checkpoint
+
+- [ ] O projeto do trabalho existe no seu GitLab.
+- [ ] O token do runner está no SSM (`/fiap/gitlab-runner/token`).
+- [ ] O script terminou e o runner aparece **online** em Settings → CI/CD → Runners.
+
+---
+
+> [!IMPORTANT]
+> ## ✋ Daqui em diante começa o trabalho que será avaliado
+> A partir da Parte 1, é **você** que desenvolve: o módulo Terraform, os workspaces e o `.gitlab-ci.yml`. O palco (runner) já está pronto — o foco agora é **código e lógica**.
+
+---
+
 ## Parte 1 - Modularizar a demo Count
 
 ### Resultado esperado desta parte
@@ -118,7 +188,9 @@ A lógica da demo Count vira um **módulo reutilizável** que recebe a quantidad
 
 **Requisito 1.** Transforme os arquivos da demo Count em um **módulo** que recebe a quantidade de nós atrás do load balancer como uma variável de entrada.
 
-- Crie uma pasta de módulo (ex: `modules/web-cluster/`) com os recursos da demo Count (`aws_instance`, `aws_elb`, `aws_security_group`, data sources de VPC/subnet).
+> 📚 **Revisar como criar módulo?** Veja a demo **[01.2 - Modules](../01-Terraform/demos/02-Modules/README.md)** (fronteira do módulo, variáveis de entrada, `source`).
+
+- Crie uma pasta de módulo (ex: `modules/web-cluster/`) com os recursos da demo Count (`aws_instance`, `aws_lb`, `aws_lb_target_group`, `aws_lb_listener`, `aws_security_group`, data sources de VPC/subnet).
 - Declare uma variável de entrada, por exemplo `variable "node_count"`, e use-a no `count` das instâncias.
 - O módulo **não** deve conter um bloco `backend` nem o `provider "aws"` duplicado — isso fica no arquivo raiz que o chama.
 
@@ -141,7 +213,7 @@ Documentação oficial:
 
 <a id="req-2"></a>
 
-**Requisito 2.** Crie o **arquivo raiz** que chama o módulo recém-criado, passando o `node_count` e expondo o DNS do load balancer como `output`.
+**Requisito 2.** Crie o **arquivo raiz** que chama o módulo recém-criado, passando o `node_count` e expondo o DNS do load balancer (ALB) como `output`.
 
 ```hcl
 # main.tf (raiz)
@@ -150,8 +222,8 @@ module "web_cluster" {
   node_count = var.node_count
 }
 
-output "elb_dns" {
-  value = module.web_cluster.elb_dns_name
+output "alb_dns" {
+  value = module.web_cluster.alb_dns_name
 }
 ```
 
@@ -184,6 +256,8 @@ O state vive no S3 e existem dois ambientes (`dev` e `prod`) com recursos nomead
 <a id="req-3"></a>
 
 **Requisito 3.** Adicione **estado remoto no S3** no arquivo raiz que chama os módulos.
+
+> 📚 **Revisar state remoto?** Veja a demo **[01.4 - State](../01-Terraform/demos/04-State/README.md)** (backend S3, `terraform init` migrando o state, lock).
 
 ```hcl
 # backend.tf (raiz)
@@ -220,6 +294,8 @@ Depois rode `terraform init` novamente — ele migra o state para o S3.
 
 **Requisito 4.** Faça com que os **nomes das máquinas** definidas dentro do módulo sigam o **workspace** atual. Exemplo: `nginx-prod-002`, `nginx-dev-001`.
 
+> 📚 **Revisar workspaces e `terraform.workspace`?** Veja a demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** (nomear recursos pelo workspace, states isolados).
+
 ```hcl
 tags = {
   Name = "nginx-${terraform.workspace}-${format("%03d", count.index + 1)}"
@@ -230,16 +306,21 @@ tags = {
 
 <a id="req-5"></a>
 
-**Requisito 5.** Faça com que o nome do **ELB** e do **Security Group** do módulo também contenham o workspace (ex: `elb-prod`, `sg-prod`).
+**Requisito 5.** Faça com que os nomes do **ALB** (`aws_lb`), do **Target Group** (`aws_lb_target_group`) e do **Security Group** do módulo também contenham o workspace (ex: `alb-prod`, `tg-prod`, `vortex-sg-prod`).
 
 > [!NOTE]
-> O nome de um `aws_elb` (Classic Load Balancer) aceita no máximo 32 caracteres e só letras, números e hífens. Mantenha curto: `elb-${terraform.workspace}` é suficiente. Descrições de Security Group devem ser ASCII sem acentos — o regex da AWS rejeita caracteres especiais.
+> O nome de um `aws_lb` (ALB) e de um `aws_lb_target_group` aceita no máximo 32 caracteres e só letras, números e hífens. Mantenha curto: `alb-${terraform.workspace}` e `tg-${terraform.workspace}` são suficientes.
+
+> [!CAUTION]
+> O **nome do Security Group não pode começar com `sg-`** — a AWS reserva esse prefixo para os IDs (`sg-01ab...`) e recusa com `invalid value for name (cannot begin with sg-)`. Use um prefixo próprio, ex: `vortex-sg-${terraform.workspace}` (vira `vortex-sg-prod`). Descrições de Security Group também devem ser ASCII, sem acentos.
 
 ---
 
 <a id="req-6"></a>
 
 **Requisito 6.** Crie um ambiente de **dev** e um de **prod** usando workspaces, com alguma diferença real entre eles (ex: `dev` com 1 nó, `prod` com 3).
+
+> 📚 A demo **[01.5 - Workspaces](../01-Terraform/demos/05-Workspaces/README.md)** mostra `terraform workspace new/select/list` e como um mesmo código gera ambientes isolados.
 
 ```bash
 cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
@@ -254,7 +335,7 @@ terraform workspace list
 ### Checkpoint
 
 - [ ] `backend.tf` aponta para `s3://base-config-<SEU-RM>` e `terraform init` migrou o state.
-- [ ] EC2, ELB e Security Group carregam o workspace no nome.
+- [ ] EC2, ALB, Target Group e Security Group carregam o workspace no nome.
 - [ ] `terraform.tfstate` está no `.gitignore`.
 - [ ] `terraform workspace list` mostra `dev` e `prod`, e os dois se diferenciam.
 
@@ -270,19 +351,22 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 <a id="req-7"></a>
 
-**Requisito 7.** Crie um **novo repositório no GitLab** e suba **somente** o código deste trabalho (módulo + raiz + `.gitlab-ci.yml`). Configure as credenciais AWS como **variáveis de CI/CD** mascaradas (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) em **Settings → CI/CD → Variables**.
+**Requisito 7.** Suba **somente** o código deste trabalho (módulo + raiz + `.gitlab-ci.yml`) para o **projeto que você criou na Parte 0** (passo 0.1). O pipeline vai rodar no **runner que você provisionou na Parte 0** — que já está online e autentica na AWS pelo **`LabRole` (instance profile da EC2)**. Ou seja, **você não configura credencial AWS nenhuma no GitLab**, igual ao [Módulo 03](../03-CICD/01-Primeiro-pipeline/README.md).
+
+> [!IMPORTANT]
+> Confirme que o runner da Parte 0 está **online** em Settings → CI/CD → Runners. Como ele roda numa EC2 com o `LabRole`, o `terraform` no pipeline já tem acesso à AWS — sem `AWS_ACCESS_KEY_ID`/`SECRET` no repositório. Isso também evita o problema das credenciais do Academy, que são temporárias e expiram.
 
 > [!CAUTION]
-> **Nunca** faça commit de credenciais ou do `terraform.tfstate`. Use as variáveis de CI/CD mascaradas. Confira o `.gitignore` antes do primeiro push.
+> **Nunca** faça commit do `terraform.tfstate` nem de segredos. Confira o `.gitignore` antes do primeiro push.
 
 ---
 
 <a id="req-8"></a>
 
-**Requisito 8.** Adicione um **pipeline de 3 etapas** (`stages`) que roda no seu **GitLab Runner próprio** (Módulo 02):
+**Requisito 8.** Adicione um **pipeline de 3 etapas** (`stages`) que roda no seu **GitLab Runner próprio** (Módulo 02). É o **mesmo padrão** que você montou no módulo de CI/CD — reaproveite o que aprendeu no [Lab 03.1](../03-CICD/01-Primeiro-pipeline/README.md) (estrutura `plan`/`apply` + artefato) e no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md) (gate de validação):
 
 1. **validar** — `terraform fmt -check`, `terraform init`, `terraform validate`;
-2. **revisar/gate** — gera um `terraform plan` e roda um gate de segurança (ex: `tflint` ou inspeção do resultado do `plan`) que **barra** configuração insegura **antes** do apply, anexando o resultado como artefato/relatório;
+2. **revisar/gate** — roda o **gate de segurança do Lab 03.2** (o **Checkov**, e opcionalmente `tflint`/`terraform test`) sobre o código, **barrando** configuração insegura **antes** do apply e anexando o relatório como artefato;
 3. **aplicar** — `terraform apply -auto-approve` no workspace escolhido, deixando as EC2s no ar.
 
 ```yaml
@@ -394,19 +478,24 @@ zip -r trabalho-final-<SEU-RM>.zip . -x '*.terraform/*' -x '*.tfstate*' -x '*.gi
 > **Prazo e forma de entrega**: `<prazo definido pelo professor>`. Confira o portal da FIAP / comunicado da turma para a data exata e o canal de submissão.
 
 > [!CAUTION]
-> **Destrua a infraestrutura ao terminar.** Deixar EC2 + ELB ligados consome o orçamento do Learner Lab (estimativa: ~$12/dia esquecido ligado). Rode em cada workspace:
+> **Destrua a infraestrutura ao terminar** — este é o fim do arco, então derrube **tudo**: a infra do trabalho (EC2 + ALB em `dev` e `prod`) **e** o runner da Parte 0. Deixar ligado consome o orçamento do Learner Lab.
 >
 > ```bash
+> # 1) infra do trabalho, nos dois ambientes
 > cd /workspaces/FIAP-Platform-Engineering/Trabalho-final
 > terraform workspace select dev  && terraform destroy -auto-approve
 > terraform workspace select prod && terraform destroy -auto-approve
+>
+> # 2) o runner da Parte 0 (a EC2 provisionada pelo script)
+> cd /workspaces/FIAP-Platform-Engineering/02-Ansible/01-provisionando-gitlab-runner/terraform-gitlab-runner
+> terraform destroy -auto-approve
 > ```
 
 ### Checkpoint
 
 - [ ] O `.zip` foi gerado sem `.terraform/` nem `.tfstate`.
 - [ ] A submissão no portal inclui o link do GitLab e os prints.
-- [ ] A infraestrutura foi destruída nos dois ambientes.
+- [ ] A infraestrutura do trabalho foi destruída nos dois ambientes **e** o runner da Parte 0 também.
 
 ---
 
@@ -442,7 +531,7 @@ Se você chegou até aqui, então construiu — em um único projeto — a respo
 | **Módulo (Terraform)** | Conjunto de arquivos `.tf` em uma pasta que pode ser chamado por outros, com variáveis de entrada e outputs. É a unidade de reuso da IaC. |
 | **State remoto** | O `terraform.tfstate` guardado fora da máquina (aqui no S3), para que vários engenheiros e o pipeline compartilhem o mesmo estado sem corromper. |
 | **Workspace** | Mecanismo do Terraform para manter múltiplos states isolados a partir do mesmo código (ex: `dev` e `prod`). |
-| **ELB (Classic)** | Elastic Load Balancer clássico da AWS, usado na demo Count para distribuir tráfego entre as EC2s com Nginx. |
+| **ALB (Application Load Balancer)** | Load balancer de camada 7 da AWS (`aws_lb` + `aws_lb_target_group` + `aws_lb_listener`), usado na demo Count para distribuir tráfego entre as EC2s com Nginx. |
 | **Security Group** | Firewall virtual da AWS que controla o tráfego de entrada/saída de uma instância. |
 | **Pipeline (CI/CD)** | Sequência de etapas automatizadas (stages/jobs) executadas pelo GitLab a cada push. |
 | **GitLab Runner** | Agente que executa os jobs do pipeline. Aqui é o Runner próprio provisionado no Módulo 02 com Ansible. |

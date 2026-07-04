@@ -32,7 +32,7 @@ Como você estruturou o módulo a partir da demo Count?
 
 - **Nome / caminho do módulo**: _______ (ex: `modules/web-cluster`)
 - **Variável de entrada para a quantidade de nós**: _______ (ex: `node_count`)
-- **Outputs expostos**: _______ (ex: `elb_dns_name`)
+- **Outputs expostos**: _______ (ex: `alb_dns_name`)
 - **Por que essa fronteira de módulo** (3 linhas): _______
 
 ---
@@ -41,7 +41,7 @@ Como você estruturou o módulo a partir da demo Count?
 
 - **Backend escolhido**: _______ (ex: S3 `base-config-<RM>`, key `trabalho-final/terraform.tfstate`)
 - **Como os ambientes são isolados**: _______ (ex: workspaces `dev` e `prod`)
-- **Bloqueio de state (locking)**: usou DynamoDB? Sim / Não — por quê: _______
+- **Bloqueio de state (locking)**: o backend S3 já faz lock nativo (lockfile). Manteve só o S3 ou adicionou algo? _______
 - **Por que state remoto em vez de local** (2-3 linhas): _______
 
 ---
@@ -58,7 +58,7 @@ Descreva as 3 etapas e o que cada uma faz:
 
 - **Ferramenta do gate de segurança**: _______ (ex: `tflint`, inspeção do `plan`)
 - **Onde o pipeline roda**: _______ (Runner próprio do Módulo 02 — confirme que estava online)
-- **Como as credenciais AWS chegam ao job sem ir para o Git**: _______
+- **Como as credenciais AWS chegam ao job sem ir para o Git**: _______ (dica: o Runner do Módulo 02 roda numa EC2 com o `LabRole` — o `terraform` usa esse *instance profile*, sem credencial no repositório)
 
 ---
 
@@ -117,14 +117,14 @@ Liste 2-3 perguntas que você faria à Helena ou ao Diego **antes** de colocar i
 
 ### Nomeação de recursos por workspace
 
-- Padrão de nome adotado para EC2 / ELB / Security Group: _______ (ex: `nginx-prod-002`, `elb-prod`, `sg-prod`)
+- Padrão de nome adotado para EC2 / ALB / Target Group / Security Group: _______ (ex: `nginx-prod-002`, `alb-prod`, `tg-prod`, `vortex-sg-prod`)
 - Por que carregar o workspace no nome: _______
 
-### Tipo de load balancer
+### Load balancer (ALB)
 
-- Manteve o `aws_elb` (Classic) da demo Count ou migrou para `aws_lb` (ALB)?
-- Escolha: _______
-- Por quê: _______
+- A demo Count usa um **Application Load Balancer** (`aws_lb` + `aws_lb_target_group` + `aws_lb_listener`).
+- Como você nomeou o ALB e o Target Group por workspace: _______
+- Algum ajuste que precisou fazer ao modularizar o ALB: _______
 
 ---
 
