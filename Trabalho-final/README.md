@@ -213,13 +213,14 @@ Documentação oficial:
 
 <a id="req-2"></a>
 
-**Requisito 2.** Crie o **arquivo raiz** que chama o módulo recém-criado, passando o `node_count` e expondo o DNS do load balancer (ALB) como `output`.
+**Requisito 2.** Crie o **arquivo raiz** que chama o módulo recém-criado, passando o `node_count` e expondo o DNS do load balancer (ALB) como `output`. O `node_count` **deriva do workspace** (é o que diferencia `dev` de `prod` — Requisito 6): assim o pipeline não precisa receber nenhuma variável extra, basta selecionar o workspace.
 
 ```hcl
 # main.tf (raiz)
 module "web_cluster" {
-  source     = "./modules/web-cluster"
-  node_count = var.node_count
+  source = "./modules/web-cluster"
+  # dev = 1 no; prod = 3 nos. O valor vem do workspace ativo, sem -var nem tfvars.
+  node_count = terraform.workspace == "prod" ? 3 : 1
 }
 
 output "alb_dns" {
@@ -330,7 +331,7 @@ terraform workspace list
 ```
 
 > [!TIP]
-> Use a flag `-auto-approve` para evitar o "type 'yes' to confirm" em todos os `apply`/`destroy` deste trabalho — não ensina nada novo e tira fricção. Diferencie o `node_count` por ambiente via arquivos `dev.tfvars` / `prod.tfvars` ou condicional sobre `terraform.workspace`.
+> Use a flag `-auto-approve` para evitar o "type 'yes' to confirm" em todos os `apply`/`destroy` deste trabalho — não ensina nada novo e tira fricção. A diferença entre os ambientes (`dev` = 1 nó, `prod` = 3) vem da **condicional sobre `terraform.workspace`** que você colocou no arquivo raiz (Requisito 2) — então basta selecionar o workspace (`terraform workspace select prod`) e aplicar; nada de `-var` ou `tfvars`.
 
 ### Checkpoint
 
@@ -363,11 +364,11 @@ Um repositório no GitLab roda um pipeline de 3 etapas no seu Runner próprio, d
 
 <a id="req-8"></a>
 
-**Requisito 8.** Adicione um **pipeline de 3 etapas** (`stages`) que roda no seu **GitLab Runner próprio** (Módulo 02). É o **mesmo padrão** que você montou no módulo de CI/CD — reaproveite o que aprendeu no [Lab 03.1](../03-CICD/01-Primeiro-pipeline/README.md) (estrutura `plan`/`apply` + artefato) e no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md) (gate de validação):
+**Requisito 8.** Adicione um **pipeline de 3 etapas** (`stages`) que roda no seu **GitLab Runner próprio** (Parte 0). É o **mesmo padrão** dos labs de CI/CD — reaproveite o [Lab 03.1](../03-CICD/01-Primeiro-pipeline/README.md) (estrutura `plan`/`apply` + artefato) e o [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md) (gate com Checkov + relatório JUnit). O pipeline provisiona **um** ambiente (o do workspace escolhido — no exemplo, `prod`):
 
 1. **validar** — `terraform fmt -check`, `terraform init`, `terraform validate`;
-2. **revisar/gate** — roda o **gate de segurança do Lab 03.2** (o **Checkov**, e opcionalmente `tflint`/`terraform test`) sobre o código, **barrando** configuração insegura **antes** do apply e anexando o relatório como artefato;
-3. **aplicar** — `terraform apply -auto-approve` no workspace escolhido, deixando as EC2s no ar.
+2. **revisar/gate** — seleciona o workspace, gera o `terraform plan` (artefato para o próximo stage) e roda o **Checkov** (igual ao Lab 03.2), publicando o relatório **JUnit** na aba **Tests**;
+3. **aplicar** — `terraform apply` do plano gerado, no mesmo workspace, deixando as EC2s no ar.
 
 ```yaml
 # .gitlab-ci.yml (esqueleto — adapte ao seu projeto)
@@ -376,36 +377,57 @@ stages:
   - revisar
   - aplicar
 
+variables:
+  WORKSPACE: prod   # ambiente que o pipeline provisiona
+
 validar:
   stage: validar
   script:
     - terraform fmt -check
     - terraform init
     - terraform validate
+  tags: [shell]
 
 revisar:
   stage: revisar
   script:
+    - terraform init
+    - terraform workspace select "$WORKSPACE" || terraform workspace new "$WORKSPACE"
     - terraform plan -out=plan.tfplan
+    # gate de seguranca do Lab 03.2: roda o Checkov e publica o relatorio JUnit.
+    # O "|| true" nao deixa os findings abortarem o job (mesma decisao do 03.2).
+    - source /opt/venv/bin/activate
+    - checkov --directory . --framework terraform -o junitxml > checkov-report.xml || true
   artifacts:
-    paths:
-      - plan.tfplan
+    when: always
+    paths: [plan.tfplan, checkov-report.xml]
+    reports:
+      junit: checkov-report.xml
+  tags: [shell]
 
 aplicar:
   stage: aplicar
   script:
+    - terraform init
+    - terraform workspace select "$WORKSPACE"
     - terraform apply -auto-approve plan.tfplan
+  dependencies: [revisar]
+  tags: [shell]
 ```
 
 <details>
-<summary><b>💡 Clique para entender: por que o gate vem ANTES do apply</b></summary>
+<summary><b>💡 Clique para entender: o gate, o workspace no CI e "reportar vs barrar"</b></summary>
 <blockquote>
 
-A demanda do Diego no Mês 3 foi clara: *"um gate de segurança que barre configuração insegura ANTES de chegar na nuvem"*. A ordem das etapas importa — validar e revisar são baratos e rápidos; aplicar é caro e cria recursos reais. Falhar cedo (no `validate`/gate) evita provisionar uma infra insegura e depois ter que destruí-la. É o princípio de "falhe cedo, falhe pequeno".
+**Por que o gate vem antes do apply:** validar e revisar são baratos; aplicar cria recursos reais. Rodar o Checkov antes deixa a análise de segurança visível (aba **Tests**) **antes** de qualquer mudança chegar à nuvem — "falhe cedo, falhe pequeno".
+
+**Reportar vs. barrar:** como no [Lab 03.2](../03-CICD/02-Validando-e-gerando-relatorios/README.md), usamos `|| true` para o Checkov **reportar sem abortar** o job — a infra da demo Count tem findings genéricos (SG aberto na 80, sem criptografia) que são **esperados**. Transformar o gate em bloqueio de verdade (remover o `|| true`, ou barrar só findings críticos) é uma **decisão sua** — registre-a no `DECISION.md`.
+
+**Workspace no CI:** este é o ponto de integração novo (workspaces do [Lab 01.5](../01-Terraform/demos/05-Workspaces/README.md) dentro do pipeline do Módulo 03). O `terraform workspace select "$WORKSPACE" || terraform workspace new "$WORKSPACE"` garante que o `plan`/`apply` rodem no ambiente certo. Como cada stage roda num job separado, o `select` é repetido no `aplicar`.
 
 Documentação oficial:
 - [GitLab CI/CD stages](https://docs.gitlab.com/ee/ci/yaml/#stages)
-- [Terraform in CI/CD](https://developer.hashicorp.com/terraform/tutorials/automation/automate-terraform)
+- [Terraform workspaces](https://developer.hashicorp.com/terraform/language/state/workspaces)
 
 </blockquote>
 </details>
@@ -422,9 +444,9 @@ O job está esperando um Runner. Verifique em **Settings → CI/CD → Runners**
 ### Checkpoint
 
 - [ ] O repositório no GitLab tem só o código deste trabalho (sem state, sem credenciais).
-- [ ] O pipeline tem 3 etapas e elas rodam no seu Runner próprio.
-- [ ] As EC2s da demo Count estão acessíveis pelo DNS do ELB.
-- [ ] O relatório de validação/plan está disponível como artefato no pipeline.
+- [ ] O pipeline tem 3 etapas (`validar → revisar → aplicar`) e elas rodam no seu Runner próprio.
+- [ ] O pipeline selecionou o workspace e as EC2s desse ambiente estão acessíveis pelo DNS do **ALB**.
+- [ ] O relatório do **Checkov** (JUnit) aparece na aba **Tests** e o `plan.tfplan` está como artefato.
 
 ---
 
@@ -535,7 +557,7 @@ Se você chegou até aqui, então construiu — em um único projeto — a respo
 | **Security Group** | Firewall virtual da AWS que controla o tráfego de entrada/saída de uma instância. |
 | **Pipeline (CI/CD)** | Sequência de etapas automatizadas (stages/jobs) executadas pelo GitLab a cada push. |
 | **GitLab Runner** | Agente que executa os jobs do pipeline. Aqui é o Runner próprio provisionado no Módulo 02 com Ansible. |
-| **Gate de segurança** | Etapa que barra configuração insegura antes do apply, falhando o pipeline se algo não passar na verificação. |
+| **Gate de segurança** | Etapa que roda a análise de segurança (Checkov) antes do apply e publica o relatório. Neste trabalho ela **reporta** os findings sem abortar o pipeline (`\|\| true`, como no Lab 03.2); transformá-la em bloqueio de verdade é uma decisão que você registra no `DECISION.md`. |
 | **ADR** | Architecture Decision Record — documento curto que registra uma escolha técnica: contexto, decisão, alternativas, consequências. |
 | **Artefato (CI/CD)** | Arquivo produzido por um job (ex: `plan.tfplan`, relatório) e disponibilizado para download no pipeline. |
 

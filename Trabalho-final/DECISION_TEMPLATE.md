@@ -56,7 +56,7 @@ Descreva as 3 etapas e o que cada uma faz:
 | 2. revisar/gate | _______ | _______ |
 | 3. aplicar | _______ | _______ |
 
-- **Ferramenta do gate de segurança**: _______ (ex: `tflint`, inspeção do `plan`)
+- **Ferramenta do gate de segurança**: _______ (ex: `Checkov` — como no Lab 03.2; `tflint`/`terraform test` são complementos opcionais)
 - **Onde o pipeline roda**: _______ (Runner próprio do Módulo 02 — confirme que estava online)
 - **Como as credenciais AWS chegam ao job sem ir para o Git**: _______ (dica: o Runner do Módulo 02 roda numa EC2 com o `LabRole` — o `terraform` usa esse *instance profile*, sem credencial no repositório)
 
